@@ -1,0 +1,28 @@
+void AFPCharacter::captureDepth() {
+  DepthCapture::AddCapture();  // 发出获取深度缓存的请求
+
+}
+
+void Tick(float DeltaTime)
+{
+ // 如果存在已完成的深度缓存请求
+ if (DepthCapture::HasFinishedCapture())
+ {
+  DepthResult *result;
+  // 获取已完成的深度缓存结果
+  result = DepthCapture::GetIfExistFinished();
+  if (result)
+  {
+   int n = result->data.Num();
+   //this is test
+   GEngine->AddOnScreenDebugMessage(-1, -1, FColor::Blue, FString::Printf(TEXT("Get Depth Size: %d "), n));
+   /* 相关辅助函数
+   TArray<TArray<float> > floatResult =  DepthCapture::DepthResult2FloatArray(result);	// 深度结果转化为二维浮点数组
+   bool saveImageOk = DepthCapture::DepthResultCapture(result, "D://depth.bmp");		// 保存深度灰度图
+   float positionDepth = DepthCapture::GetPositionDepth(result, FIntPoint(500,500));	// 获取某一点的深度值
+   */
+  }
+ }
+}
+
+

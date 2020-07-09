@@ -1,0 +1,340 @@
+<h1 id="获取深度缓存">获取深度缓存</h1>
+<h2 id="深度像素格式">深度像素格式</h2>
+<figure>
+<img src="https://i.loli.net/2020/06/15/G3emJyTbYv5Zx4H.png" alt="" /><figcaption>DepthPixel</figcaption>
+</figure>
+<h2 id="way1直接使用enqueue_render_command命令获取效率较低">Way1：直接使用ENQUEUE_RENDER_COMMAND命令获取(效率较低)</h2>
+<blockquote>
+<p>全屏可以解决像素不对应的问题！</p>
+</blockquote>
+<p>在任意<code>tick</code>函数或者其他函数添加以下的命令：</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb1-1"><a href="#cb1-1"></a><span class="kw">struct</span> DepthPixel   <span class="co">//定义深度像素结构体</span></span>
+<span id="cb1-2"><a href="#cb1-2"></a>    {</span>
+<span id="cb1-3"><a href="#cb1-3"></a>        <span class="dt">float</span> depth;</span>
+<span id="cb1-4"><a href="#cb1-4"></a>        <span class="dt">char</span> stencil;</span>
+<span id="cb1-5"><a href="#cb1-5"></a>        <span class="dt">char</span> unused1;</span>
+<span id="cb1-6"><a href="#cb1-6"></a>        <span class="dt">char</span> unused2;</span>
+<span id="cb1-7"><a href="#cb1-7"></a>        <span class="dt">char</span> unused3;</span>
+<span id="cb1-8"><a href="#cb1-8"></a>    };</span>
+<span id="cb1-9"><a href="#cb1-9"></a></span>
+<span id="cb1-10"><a href="#cb1-10"></a>    <span class="dt">float</span>* cpuDataPtr;  <span class="co">// Texture深度值数组首地址</span></span>
+<span id="cb1-11"><a href="#cb1-11"></a>    TArray&lt;DepthPixel&gt; mydata;  <span class="co">//最终获取色深度值数据</span></span>
+<span id="cb1-12"><a href="#cb1-12"></a>    FIntPoint buffsize; <span class="co">//深度长宽大小X和Y</span></span>
+<span id="cb1-13"><a href="#cb1-13"></a></span>
+<span id="cb1-14"><a href="#cb1-14"></a>    ENQUEUE_RENDER_COMMAND(ReadSurfaceFloatCommand)(    <span class="co">// 将读取深度数据的命令推给渲染线程进行执行</span></span>
+<span id="cb1-15"><a href="#cb1-15"></a>        [&amp;cpuDataPtr, &amp;mydata, &amp;buffsize](FRHICommandListImmediate&amp; RHICmdList) <span class="co">//&amp;cpuDataPtr, &amp;mydata, &amp;buffsize为传入的外部参数</span></span>
+<span id="cb1-16"><a href="#cb1-16"></a>    {</span>
+<span id="cb1-17"><a href="#cb1-17"></a>        FSceneRenderTargets::Get(RHICmdList).AdjustGBufferRefCount(RHICmdList, <span class="dv">1</span>);</span>
+<span id="cb1-18"><a href="#cb1-18"></a>        FTexture2DRHIRef uTex2DRes = FSceneRenderTargets::Get(RHICmdList).GetSceneDepthSurface();   </span>
+<span id="cb1-19"><a href="#cb1-19"></a>        buffsize = uTex2DRes-&gt;GetSizeXY();</span>
+<span id="cb1-20"><a href="#cb1-20"></a>         uint32 sx = buffsize.X;</span>
+<span id="cb1-21"><a href="#cb1-21"></a>        uint32 sy = buffsize.Y;</span>
+<span id="cb1-22"><a href="#cb1-22"></a>         mydata.AddUninitialized(sx * sy);</span>
+<span id="cb1-23"><a href="#cb1-23"></a>         uint32 Lolstrid = <span class="dv">0</span>;</span>
+<span id="cb1-24"><a href="#cb1-24"></a>        cpuDataPtr = (<span class="dt">float</span>*)RHILockTexture2D(uTex2DRes,<span class="dv">0</span>,RLM_ReadOnly,Lolstrid,<span class="kw">true</span>);  <span class="co">// 加锁 获取可读depth Texture深度值数组首地址</span></span>
+<span id="cb1-25"><a href="#cb1-25"></a>        memcpy(mydata.GetData(), cpuDataPtr, sx * sy * <span class="kw">sizeof</span>(DepthPixel));     <span class="co">//复制深度数据</span></span>
+<span id="cb1-26"><a href="#cb1-26"></a>        RHIUnlockTexture2D(uTex2DRes, <span class="dv">0</span>, <span class="kw">true</span>); <span class="co">//解锁</span></span>
+<span id="cb1-27"><a href="#cb1-27"></a>        FSceneRenderTargets::Get(RHICmdList).AdjustGBufferRefCount(RHICmdList, -<span class="dv">1</span>); </span>
+<span id="cb1-28"><a href="#cb1-28"></a></span>
+<span id="cb1-29"><a href="#cb1-29"></a>    });</span>
+<span id="cb1-30"><a href="#cb1-30"></a>    FlushRenderingCommands();   <span class="co">//等待渲染线程执行</span></span>
+<span id="cb1-31"><a href="#cb1-31"></a></span>
+<span id="cb1-32"><a href="#cb1-32"></a>    mydata;     <span class="co">//最终获取深度数据</span></span></code></pre></div>
+<p>最终返回的<code>mydata</code>数据就是最终的深度值数组，其中每个深度值的结构是<code>DepthPixel</code>，其中一个成员为<code>depth</code>，另外四个不不使用。其中使用上面的几个命令需要添加“<code>RHI.h</code>”和<code>"RHIResources.h"</code>头文件。</p>
+<h2 id="way2写个请求类读取">Way2：写个请求类读取</h2>
+<p>UML图：</p>
+<figure>
+<img src="https://i.loli.net/2020/06/29/BrpD1iKkXm3P2Qn.png" alt="" /><figcaption>depth_UML</figcaption>
+</figure>
+<p>流程图：</p>
+<figure>
+<img src="https://i.loli.net/2020/06/29/JRovQn1dOH9hL7I.png" alt="" /><figcaption>流程图</figcaption>
+</figure>
+<h3 id="首先在项目的build.cs文件添加">1. 首先在项目的build.cs文件添加：</h3>
+<p>添加引擎源码地址</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode c#"><code class="sourceCode cs"><span id="cb2-1"><a href="#cb2-1"></a>        <span class="co">// 添加引擎源码地址</span></span>
+<span id="cb2-2"><a href="#cb2-2"></a>        <span class="dt">string</span> EnginePath = <span class="st">&quot;C:/Program Files (x86)/UE4+VS2017/UnrealEngine/&quot;</span>;</span>
+<span id="cb2-3"><a href="#cb2-3"></a>        PrivateIncludePaths.<span class="fu">AddRange</span>(</span>
+<span id="cb2-4"><a href="#cb2-4"></a>            <span class="kw">new</span> <span class="dt">string</span>[] {</span>
+<span id="cb2-5"><a href="#cb2-5"></a>               EnginePath + <span class="st">&quot;Source/Runtime/Renderer/Private&quot;</span>,</span>
+<span id="cb2-6"><a href="#cb2-6"></a>               EnginePath + <span class="st">&quot;Source/Runtime/Renderer/Private/CompositionLighting&quot;</span>,</span>
+<span id="cb2-7"><a href="#cb2-7"></a>               EnginePath + <span class="st">&quot;Source/Runtime/Renderer/Private/PostProcess&quot;</span></span>
+<span id="cb2-8"><a href="#cb2-8"></a>                }</span>
+<span id="cb2-9"><a href="#cb2-9"></a>            );</span></code></pre></div>
+<p>添加引依赖项</p>
+<figure>
+<img src="https://i.loli.net/2020/06/28/ygeFOcrv579wIUP.png" alt="" /><figcaption>依赖项</figcaption>
+</figure>
+<h3 id="类实现">2. 类实现</h3>
+<p>将下面类代码复制到<code>PostProcessing.h</code>文件任意位置：</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb3-1"><a href="#cb3-1"></a><span class="co">/*****************************************Get Depth Class***********************************************/</span></span>
+<span id="cb3-2"><a href="#cb3-2"></a></span>
+<span id="cb3-3"><a href="#cb3-3"></a><span class="co">/*  存储一个像素的缓存</span></span>
+<span id="cb3-4"><a href="#cb3-4"></a><span class="co">    depth   深度缓存</span></span>
+<span id="cb3-5"><a href="#cb3-5"></a><span class="co">    stencil （抠图缓存）*/</span></span>
+<span id="cb3-6"><a href="#cb3-6"></a><span class="co">struct DepthPixel</span></span>
+<span id="cb3-7"><a href="#cb3-7"></a><span class="co">{</span></span>
+<span id="cb3-8"><a href="#cb3-8"></a><span class="co">    float depth;</span></span>
+<span id="cb3-9"><a href="#cb3-9"></a><span class="co">    char stencil;</span></span>
+<span id="cb3-10"><a href="#cb3-10"></a><span class="co">    char unused1;</span></span>
+<span id="cb3-11"><a href="#cb3-11"></a><span class="co">    char unused2;</span></span>
+<span id="cb3-12"><a href="#cb3-12"></a><span class="co">    char unused3;</span></span>
+<span id="cb3-13"><a href="#cb3-13"></a><span class="co">};</span></span>
+<span id="cb3-14"><a href="#cb3-14"></a></span>
+<span id="cb3-15"><a href="#cb3-15"></a><span class="co">/*  存储整个视窗的缓存</span></span>
+<span id="cb3-16"><a href="#cb3-16"></a><span class="co">    data            像素缓存数组</span></span>
+<span id="cb3-17"><a href="#cb3-17"></a><span class="co">    bufferSizeX     缓存大小X</span></span>
+<span id="cb3-18"><a href="#cb3-18"></a><span class="co">    bufferSizeY     缓存大小Y</span></span>
+<span id="cb3-19"><a href="#cb3-19"></a><span class="co">    pixelSizeBytes  像素缓存字节数*/</span></span>
+<span id="cb3-20"><a href="#cb3-20"></a><span class="kw">struct</span> DepthResult</span>
+<span id="cb3-21"><a href="#cb3-21"></a>{</span>
+<span id="cb3-22"><a href="#cb3-22"></a>    TArray&lt;DepthPixel&gt; data;</span>
+<span id="cb3-23"><a href="#cb3-23"></a>    <span class="dt">int</span> bufferSizeX;</span>
+<span id="cb3-24"><a href="#cb3-24"></a>    <span class="dt">int</span> bufferSizeY;</span>
+<span id="cb3-25"><a href="#cb3-25"></a>    <span class="dt">int</span> pixelSizeBytes;</span>
+<span id="cb3-26"><a href="#cb3-26"></a>};</span>
+<span id="cb3-27"><a href="#cb3-27"></a></span>
+<span id="cb3-28"><a href="#cb3-28"></a></span>
+<span id="cb3-29"><a href="#cb3-29"></a></span>
+<span id="cb3-30"><a href="#cb3-30"></a><span class="co">/*  获取深度缓存的类     */</span></span>
+<span id="cb3-31"><a href="#cb3-31"></a><span class="kw">class</span> RENDERER_API DepthCapture</span>
+<span id="cb3-32"><a href="#cb3-32"></a>{</span>
+<span id="cb3-33"><a href="#cb3-33"></a><span class="kw">public</span>:</span>
+<span id="cb3-34"><a href="#cb3-34"></a>    <span class="co">/*  静态成员，当用户发出一个获取深度缓存的请求后，waitForCapture长度加1，新增DepthResult内容为空</span></span>
+<span id="cb3-35"><a href="#cb3-35"></a><span class="co">                当系统完成一个深度缓存的请求后，waitForCapture长度减一 */</span></span>
+<span id="cb3-36"><a href="#cb3-36"></a>    <span class="at">static</span> TQueue&lt;DepthResult *, EQueueMode::Mpsc&gt; waitForCapture;</span>
+<span id="cb3-37"><a href="#cb3-37"></a>    <span class="co">/*  静态成员，当系统完成一个深度缓存的请求后，finishedCapture长度加1，</span></span>
+<span id="cb3-38"><a href="#cb3-38"></a><span class="co">                新增DepthResult含有深度缓存信息   */</span></span>
+<span id="cb3-39"><a href="#cb3-39"></a>    <span class="at">static</span> TQueue&lt;DepthResult *, EQueueMode::Mpsc&gt; finishedCapture;</span>
+<span id="cb3-40"><a href="#cb3-40"></a></span>
+<span id="cb3-41"><a href="#cb3-41"></a><span class="kw">public</span>:</span>
+<span id="cb3-42"><a href="#cb3-42"></a>    <span class="co">/*用户发出一个获取深度缓存的请求时调用*/</span></span>
+<span id="cb3-43"><a href="#cb3-43"></a>    <span class="at">static</span> <span class="dt">void</span> AddCapture()</span>
+<span id="cb3-44"><a href="#cb3-44"></a>    {</span>
+<span id="cb3-45"><a href="#cb3-45"></a>        waitForCapture.Enqueue(<span class="kw">new</span> DepthResult());</span>
+<span id="cb3-46"><a href="#cb3-46"></a>    }</span>
+<span id="cb3-47"><a href="#cb3-47"></a>    <span class="co">/*系统完成一个深度缓存请求后调用*/</span></span>
+<span id="cb3-48"><a href="#cb3-48"></a>    <span class="at">static</span> <span class="dt">void</span> FinishedCapture(DepthResult *result)</span>
+<span id="cb3-49"><a href="#cb3-49"></a>    {</span>
+<span id="cb3-50"><a href="#cb3-50"></a>        finishedCapture.Enqueue(result);</span>
+<span id="cb3-51"><a href="#cb3-51"></a>    }</span>
+<span id="cb3-52"><a href="#cb3-52"></a>    <span class="co">/*返回是否存在已经完成的请求*/</span></span>
+<span id="cb3-53"><a href="#cb3-53"></a>    <span class="at">static</span> <span class="dt">bool</span> HasFinishedCapture()</span>
+<span id="cb3-54"><a href="#cb3-54"></a>    {</span>
+<span id="cb3-55"><a href="#cb3-55"></a>        <span class="cf">return</span> !finishedCapture.IsEmpty();</span>
+<span id="cb3-56"><a href="#cb3-56"></a>    }</span>
+<span id="cb3-57"><a href="#cb3-57"></a>    <span class="co">/*如果存在已完成的请求，返回一个深度结果*/</span></span>
+<span id="cb3-58"><a href="#cb3-58"></a>    <span class="at">static</span> DepthResult* GetIfExistFinished()</span>
+<span id="cb3-59"><a href="#cb3-59"></a>    {</span>
+<span id="cb3-60"><a href="#cb3-60"></a>        DepthResult* result = NULL;</span>
+<span id="cb3-61"><a href="#cb3-61"></a>        <span class="cf">if</span> (!finishedCapture.IsEmpty())</span>
+<span id="cb3-62"><a href="#cb3-62"></a>        {</span>
+<span id="cb3-63"><a href="#cb3-63"></a>            finishedCapture.Dequeue(result);</span>
+<span id="cb3-64"><a href="#cb3-64"></a>        }</span>
+<span id="cb3-65"><a href="#cb3-65"></a>        <span class="cf">return</span> result;</span>
+<span id="cb3-66"><a href="#cb3-66"></a>    }</span>
+<span id="cb3-67"><a href="#cb3-67"></a>    <span class="co">/*返回是否存在等待系统执行的请求*/</span></span>
+<span id="cb3-68"><a href="#cb3-68"></a>    <span class="at">static</span> <span class="dt">bool</span> HasCaptureRequest()</span>
+<span id="cb3-69"><a href="#cb3-69"></a>    {</span>
+<span id="cb3-70"><a href="#cb3-70"></a>        <span class="cf">return</span> !waitForCapture.IsEmpty();</span>
+<span id="cb3-71"><a href="#cb3-71"></a>    }</span>
+<span id="cb3-72"><a href="#cb3-72"></a>    <span class="co">/*如果存在待完成的请求，返回一个深度结果（为空）*/</span></span>
+<span id="cb3-73"><a href="#cb3-73"></a><span class="co">    static DepthResult* GetIfExistRequest()</span></span>
+<span id="cb3-74"><a href="#cb3-74"></a><span class="co">    {</span></span>
+<span id="cb3-75"><a href="#cb3-75"></a><span class="co">        DepthResult* result = NULL;</span></span>
+<span id="cb3-76"><a href="#cb3-76"></a><span class="co">        if (!waitForCapture.IsEmpty())</span></span>
+<span id="cb3-77"><a href="#cb3-77"></a><span class="co">        {</span></span>
+<span id="cb3-78"><a href="#cb3-78"></a><span class="co">            waitForCapture.Dequeue(result);</span></span>
+<span id="cb3-79"><a href="#cb3-79"></a><span class="co">        }</span></span>
+<span id="cb3-80"><a href="#cb3-80"></a><span class="co">        return result;</span></span>
+<span id="cb3-81"><a href="#cb3-81"></a><span class="co">    }</span></span>
+<span id="cb3-82"><a href="#cb3-82"></a></span>
+<span id="cb3-83"><a href="#cb3-83"></a><span class="co">    /////////////////////辅助方法////////////////////////</span></span>
+<span id="cb3-84"><a href="#cb3-84"></a><span class="co">    </span></span>
+<span id="cb3-85"><a href="#cb3-85"></a><span class="co">    /**********     获取某一点的深度数据，返回float</span></span>
+<span id="cb3-86"><a href="#cb3-86"></a><span class="co">    depthResult     深度数据结果</span></span>
+<span id="cb3-87"><a href="#cb3-87"></a><span class="co">    point           屏幕某个点的位置*/</span></span>
+<span id="cb3-88"><a href="#cb3-88"></a>    <span class="at">static</span> <span class="dt">float</span> getPositionDepth(DepthResult *depthResult,FIntPoint point) {</span>
+<span id="cb3-89"><a href="#cb3-89"></a>        <span class="cf">return</span> depthResult-&gt;data[point.Y * depthResult-&gt;bufferSizeX + point.X].depth;</span>
+<span id="cb3-90"><a href="#cb3-90"></a>    }</span>
+<span id="cb3-91"><a href="#cb3-91"></a></span>
+<span id="cb3-92"><a href="#cb3-92"></a></span>
+<span id="cb3-93"><a href="#cb3-93"></a>    <span class="co">/**********     深度数据转化为二维浮点数组，返回float的二维数组</span></span>
+<span id="cb3-94"><a href="#cb3-94"></a><span class="co">    depthResult     深度数据结果*/</span></span>
+<span id="cb3-95"><a href="#cb3-95"></a>    <span class="at">static</span> TArray&lt;TArray&lt;<span class="dt">float</span>&gt; &gt; DepthResult2FloatArray(DepthResult *depthResult) {</span>
+<span id="cb3-96"><a href="#cb3-96"></a>        TArray&lt;TArray&lt;<span class="dt">float</span>&gt; &gt; result;</span>
+<span id="cb3-97"><a href="#cb3-97"></a>        <span class="cf">for</span> (<span class="dt">size_t</span> i = <span class="dv">0</span>; i &lt; depthResult-&gt;bufferSizeY; ++i)</span>
+<span id="cb3-98"><a href="#cb3-98"></a>        {</span>
+<span id="cb3-99"><a href="#cb3-99"></a>            TArray&lt;<span class="dt">float</span>&gt; line;</span>
+<span id="cb3-100"><a href="#cb3-100"></a>            <span class="cf">for</span> (<span class="dt">size_t</span> j = <span class="dv">0</span>; j &lt; depthResult-&gt;bufferSizeX; ++j)</span>
+<span id="cb3-101"><a href="#cb3-101"></a>            {</span>
+<span id="cb3-102"><a href="#cb3-102"></a>                line.Add(depthResult-&gt;data[i * depthResult-&gt;bufferSizeX + j].depth);</span>
+<span id="cb3-103"><a href="#cb3-103"></a>            }</span>
+<span id="cb3-104"><a href="#cb3-104"></a>            result.Add(line);</span>
+<span id="cb3-105"><a href="#cb3-105"></a>        }</span>
+<span id="cb3-106"><a href="#cb3-106"></a>        <span class="cf">return</span> result;</span>
+<span id="cb3-107"><a href="#cb3-107"></a>    }</span>
+<span id="cb3-108"><a href="#cb3-108"></a>    </span>
+<span id="cb3-109"><a href="#cb3-109"></a>    <span class="co">/**********     将深度结果转化为bmp灰度图，返回是否存储成功的bool值</span></span>
+<span id="cb3-110"><a href="#cb3-110"></a><span class="co">    depthResult     深度数据结果</span></span>
+<span id="cb3-111"><a href="#cb3-111"></a><span class="co">    storePath       存储路径，名字后缀必须为.bmg*/</span></span>
+<span id="cb3-112"><a href="#cb3-112"></a>    <span class="at">static</span> <span class="dt">bool</span> DepthResultCapture(DepthResult *depthResult, FString storePath) {</span>
+<span id="cb3-113"><a href="#cb3-113"></a>        <span class="dt">bool</span> imageSavedOk = <span class="kw">false</span>;</span>
+<span id="cb3-114"><a href="#cb3-114"></a>        TArray&lt;FColor&gt; RawPixels;</span>
+<span id="cb3-115"><a href="#cb3-115"></a>        RawPixels.AddUninitialized(depthResult-&gt;bufferSizeX * depthResult-&gt;bufferSizeY);</span>
+<span id="cb3-116"><a href="#cb3-116"></a></span>
+<span id="cb3-117"><a href="#cb3-117"></a>        <span class="cf">for</span> (uint64 i = <span class="dv">0</span>; i &lt; depthResult-&gt;bufferSizeX * depthResult-&gt;bufferSizeY; ++i)</span>
+<span id="cb3-118"><a href="#cb3-118"></a>        {</span>
+<span id="cb3-119"><a href="#cb3-119"></a>            <span class="co">// Switch Blue changes.</span></span>
+<span id="cb3-120"><a href="#cb3-120"></a>            uint8 v = depthResult-&gt;data[i].depth * <span class="dv">10000000</span>;</span>
+<span id="cb3-121"><a href="#cb3-121"></a>            <span class="at">const</span> uint8 PR = v &gt; <span class="dv">255</span> ? <span class="dv">255</span> : v;</span>
+<span id="cb3-122"><a href="#cb3-122"></a>            RawPixels[i].B = PR;</span>
+<span id="cb3-123"><a href="#cb3-123"></a>        }</span>
+<span id="cb3-124"><a href="#cb3-124"></a>        <span class="co">// 保存为灰度图</span></span>
+<span id="cb3-125"><a href="#cb3-125"></a>        imageSavedOk = FFileHelper::CreateBitmap(*storePath, depthResult-&gt;bufferSizeX, depthResult-&gt;bufferSizeY, RawPixels.GetData());</span>
+<span id="cb3-126"><a href="#cb3-126"></a></span>
+<span id="cb3-127"><a href="#cb3-127"></a>        <span class="cf">return</span> imageSavedOk;</span>
+<span id="cb3-128"><a href="#cb3-128"></a>    }</span>
+<span id="cb3-129"><a href="#cb3-129"></a>    <span class="co">//friend void AddPostProcessingPasses(FRDGBuilder&amp; GraphBuilder, const FViewInfo&amp; View, const FPostProcessingInputs&amp; Inputs);</span></span>
+<span id="cb3-130"><a href="#cb3-130"></a>};</span>
+<span id="cb3-131"><a href="#cb3-131"></a></span>
+<span id="cb3-132"><a href="#cb3-132"></a><span class="co">/*****************************************end******************************************************/</span></span></code></pre></div>
+<p>将下面类中静态成员初始化和添加执行获取代码代码复制到<code>PostProcessing.cpp</code>文件任意位置：</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb4-1"><a href="#cb4-1"></a><span class="co">/*类静态成员的定义*/</span></span>
+<span id="cb4-2"><a href="#cb4-2"></a><span class="co">TQueue&lt;DepthResult *, EQueueMode::Mpsc&gt; DepthCapture::waitForCapture;</span></span>
+<span id="cb4-3"><a href="#cb4-3"></a><span class="co">TQueue&lt; DepthResult *, EQueueMode::Mpsc&gt; DepthCapture::finishedCapture;</span></span>
+<span id="cb4-4"><a href="#cb4-4"></a></span>
+<span id="cb4-5"><a href="#cb4-5"></a><span class="co">/*获取深度缓存*/</span></span>
+<span id="cb4-6"><a href="#cb4-6"></a><span class="dt">void</span> AddDepthInspectorPass(FRDGBuilder&amp; GraphBuilder, <span class="at">const</span> FViewInfo&amp; View, DepthResult* result)</span>
+<span id="cb4-7"><a href="#cb4-7"></a>{</span>
+<span id="cb4-8"><a href="#cb4-8"></a></span>
+<span id="cb4-9"><a href="#cb4-9"></a>    RDG_EVENT_SCOPE(GraphBuilder, <span class="st">&quot;DepthInspector&quot;</span>);</span>
+<span id="cb4-10"><a href="#cb4-10"></a>    {</span>
+<span id="cb4-11"><a href="#cb4-11"></a>        <span class="co">// 获取渲染对象</span></span>
+<span id="cb4-12"><a href="#cb4-12"></a>        FSceneRenderTargets&amp; renderTargets = FSceneRenderTargets::Get(GRHICommandList.GetImmediateCommandList());</span>
+<span id="cb4-13"><a href="#cb4-13"></a></span>
+<span id="cb4-14"><a href="#cb4-14"></a>        <span class="co">// 定义拷贝参数</span></span>
+<span id="cb4-15"><a href="#cb4-15"></a>        uint32 striped = <span class="dv">0</span>;</span>
+<span id="cb4-16"><a href="#cb4-16"></a>        FIntPoint size = renderTargets.GetBufferSizeXY();</span>
+<span id="cb4-17"><a href="#cb4-17"></a>        result-&gt;bufferSizeX = size.X;</span>
+<span id="cb4-18"><a href="#cb4-18"></a>        result-&gt;bufferSizeY = size.Y;</span>
+<span id="cb4-19"><a href="#cb4-19"></a>         result-&gt;pixelSizeBytes = <span class="kw">sizeof</span>(DepthPixel);</span>
+<span id="cb4-20"><a href="#cb4-20"></a>        result-&gt;data.AddUninitialized(size.X * size.Y);</span>
+<span id="cb4-21"><a href="#cb4-21"></a></span>
+<span id="cb4-22"><a href="#cb4-22"></a>        <span class="co">// 获取视窗某一帧的深度缓存对象</span></span>
+<span id="cb4-23"><a href="#cb4-23"></a>        FRHITexture2D* depthTexture = (FRHITexture2D *)renderTargets.SceneDepthZ-&gt;GetRenderTargetItem().TargetableTexture.GetReference();</span>
+<span id="cb4-24"><a href="#cb4-24"></a></span>
+<span id="cb4-25"><a href="#cb4-25"></a>        <span class="co">// 执行拷贝深度缓存操作，将GPU显存中的缓存信息拷贝到CPU内存中，返回指向这块CPU内存的首地址</span></span>
+<span id="cb4-26"><a href="#cb4-26"></a>        <span class="dt">void</span>* buffer = RHILockTexture2D(depthTexture, <span class="dv">0</span>, EResourceLockMode::RLM_ReadOnly, striped, <span class="kw">true</span>);</span>
+<span id="cb4-27"><a href="#cb4-27"></a></span>
+<span id="cb4-28"><a href="#cb4-28"></a>        <span class="co">// 将缓存结果拷贝到result，用于输出</span></span>
+<span id="cb4-29"><a href="#cb4-29"></a>        memcpy(result-&gt;data.GetData(), buffer, size.X * size.Y * <span class="dv">8</span>);</span>
+<span id="cb4-30"><a href="#cb4-30"></a></span>
+<span id="cb4-31"><a href="#cb4-31"></a>        <span class="co">// 必须执行解锁语句，否则被锁住的GPU缓存信息将不能释放</span></span>
+<span id="cb4-32"><a href="#cb4-32"></a>        RHIUnlockTexture2D(depthTexture, <span class="dv">0</span>, <span class="kw">true</span>);</span>
+<span id="cb4-33"><a href="#cb4-33"></a></span>
+<span id="cb4-34"><a href="#cb4-34"></a>        <span class="co">// 拷贝结果入队</span></span>
+<span id="cb4-35"><a href="#cb4-35"></a>        DepthCapture::FinishedCapture(result);</span>
+<span id="cb4-36"><a href="#cb4-36"></a>    }</span>
+<span id="cb4-37"><a href="#cb4-37"></a>}</span>
+<span id="cb4-38"><a href="#cb4-38"></a><span class="co">////////////////////////////////////////</span></span></code></pre></div>
+<p><code>PostProcessing.cpp</code>中该位置添加以下代码：</p>
+<figure>
+<img src="https://i.loli.net/2020/06/28/okTW2Z3gVpMyN41.png" alt="" /><figcaption>添加代码</figcaption>
+</figure>
+<p>代码如下：</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb5-1"><a href="#cb5-1"></a>    <span class="co">// Capture depth buffer，otherwise the buffer will be changed</span></span>
+<span id="cb5-2"><a href="#cb5-2"></a>    <span class="cf">if</span> (DepthCapture::HasCaptureRequest())</span>
+<span id="cb5-3"><a href="#cb5-3"></a>    {</span>
+<span id="cb5-4"><a href="#cb5-4"></a>        DepthResult *reuslt;</span>
+<span id="cb5-5"><a href="#cb5-5"></a>        reuslt = DepthCapture::GetIfExistRequest();</span>
+<span id="cb5-6"><a href="#cb5-6"></a>        <span class="cf">if</span> (reuslt)</span>
+<span id="cb5-7"><a href="#cb5-7"></a>        {</span>
+<span id="cb5-8"><a href="#cb5-8"></a>            AddDepthInspectorPass(GraphBuilder, View, reuslt);</span>
+<span id="cb5-9"><a href="#cb5-9"></a>        }</span>
+<span id="cb5-10"><a href="#cb5-10"></a>    }</span></code></pre></div>
+<h3 id="调用">3. 调用</h3>
+<p>绑定一个事件(Action)发出获取深度缓存数据的请求，事件的函数如下，发出请求：</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb6-1"><a href="#cb6-1"></a><span class="dt">void</span> captureDepth() {</span>
+<span id="cb6-2"><a href="#cb6-2"></a>    DepthCapture::AddCapture();  <span class="co">// 发出获取深度缓存的请求</span></span>
+<span id="cb6-3"><a href="#cb6-3"></a>}</span></code></pre></div>
+<p>在Tick函数中检查是否完成深度缓存的获取，完成之后可以获取；使用以下的代码可以获取深度值，获取的结果为<code>result</code>：</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb7-1"><a href="#cb7-1"></a><span class="dt">void</span> Tick(<span class="dt">float</span> DeltaTime)</span>
+<span id="cb7-2"><a href="#cb7-2"></a>{</span>
+<span id="cb7-3"><a href="#cb7-3"></a> <span class="co">// 如果存在已完成的深度缓存请求</span></span>
+<span id="cb7-4"><a href="#cb7-4"></a> <span class="cf">if</span> (DepthCapture::HasFinishedCapture())</span>
+<span id="cb7-5"><a href="#cb7-5"></a> {</span>
+<span id="cb7-6"><a href="#cb7-6"></a>  DepthResult *result;</span>
+<span id="cb7-7"><a href="#cb7-7"></a>  <span class="co">// 获取已完成的深度缓存结果</span></span>
+<span id="cb7-8"><a href="#cb7-8"></a>  result = DepthCapture::GetIfExistFinished();</span>
+<span id="cb7-9"><a href="#cb7-9"></a>  <span class="cf">if</span> (result)</span>
+<span id="cb7-10"><a href="#cb7-10"></a>  {</span>
+<span id="cb7-11"><a href="#cb7-11"></a>   <span class="dt">int</span> n = result-&gt;data.Num();</span>
+<span id="cb7-12"><a href="#cb7-12"></a>   <span class="co">//this is test</span></span>
+<span id="cb7-13"><a href="#cb7-13"></a>   GEngine-&gt;AddOnScreenDebugMessage(-<span class="dv">1</span>, -<span class="dv">1</span>, FColor::Blue, FString::Printf(TEXT(<span class="st">&quot;Get Depth Size: </span><span class="sc">%d</span><span class="st"> &quot;</span>), n));</span>
+<span id="cb7-14"><a href="#cb7-14"></a>   <span class="co">/* 相关辅助函数</span></span>
+<span id="cb7-15"><a href="#cb7-15"></a><span class="co">   TArray&lt;TArray&lt;float&gt; &gt; floatResult =  DepthCapture::DepthResult2FloatArray(result);  // 深度结果转化为二维浮点数组</span></span>
+<span id="cb7-16"><a href="#cb7-16"></a><span class="co">   bool saveImageOk = DepthCapture::DepthResultCapture(result, &quot;D://depth.bmp&quot;);        // 保存深度灰度图</span></span>
+<span id="cb7-17"><a href="#cb7-17"></a><span class="co">   float positionDepth = DepthCapture::GetPositionDepth(result, FIntPoint(500,500));    // 获取某一点的深度值</span></span>
+<span id="cb7-18"><a href="#cb7-18"></a><span class="co">   */</span></span>
+<span id="cb7-19"><a href="#cb7-19"></a>  }</span>
+<span id="cb7-20"><a href="#cb7-20"></a> }</span>
+<span id="cb7-21"><a href="#cb7-21"></a>}</span></code></pre></div>
+<h2 id="验证正确性">验证正确性</h2>
+<p>使用UE绑定一个时间函数来进行深度图的输出，保存为一个<code>bmp</code>图，事件函数如下:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb8-1"><a href="#cb8-1"></a><span class="dt">void</span> [YourClass]::CaptureToggle() {</span>
+<span id="cb8-2"><a href="#cb8-2"></a>    <span class="kw">struct</span> DepthPixel</span>
+<span id="cb8-3"><a href="#cb8-3"></a>    {</span>
+<span id="cb8-4"><a href="#cb8-4"></a>        <span class="dt">float</span> depth;</span>
+<span id="cb8-5"><a href="#cb8-5"></a>        <span class="dt">char</span> stencil;</span>
+<span id="cb8-6"><a href="#cb8-6"></a>        <span class="dt">char</span> unused1;</span>
+<span id="cb8-7"><a href="#cb8-7"></a>        <span class="dt">char</span> unused2;</span>
+<span id="cb8-8"><a href="#cb8-8"></a>        <span class="dt">char</span> unused3;</span>
+<span id="cb8-9"><a href="#cb8-9"></a>    };</span>
+<span id="cb8-10"><a href="#cb8-10"></a></span>
+<span id="cb8-11"><a href="#cb8-11"></a>    <span class="dt">float</span>* cpuDataPtr;</span>
+<span id="cb8-12"><a href="#cb8-12"></a>    TArray&lt;DepthPixel&gt; mydata;</span>
+<span id="cb8-13"><a href="#cb8-13"></a>    FIntPoint buffsize;</span>
+<span id="cb8-14"><a href="#cb8-14"></a>    ENQUEUE_RENDER_COMMAND(ReadSurfaceFloatCommand)(</span>
+<span id="cb8-15"><a href="#cb8-15"></a>        [&amp;cpuDataPtr, &amp;mydata, &amp;buffsize](FRHICommandListImmediate&amp; RHICmdList)</span>
+<span id="cb8-16"><a href="#cb8-16"></a>    {</span>
+<span id="cb8-17"><a href="#cb8-17"></a>        FSceneRenderTargets::Get(RHICmdList).AdjustGBufferRefCount(RHICmdList, <span class="dv">1</span>);</span>
+<span id="cb8-18"><a href="#cb8-18"></a>        uint32 Lolstrid = <span class="dv">0</span>;</span>
+<span id="cb8-19"><a href="#cb8-19"></a>        FTexture2DRHIRef uTex2DRes = FSceneRenderTargets::Get(RHICmdList).GetSceneDepthTexture();</span>
+<span id="cb8-20"><a href="#cb8-20"></a></span>
+<span id="cb8-21"><a href="#cb8-21"></a>        buffsize = uTex2DRes-&gt;GetSizeXY();</span>
+<span id="cb8-22"><a href="#cb8-22"></a></span>
+<span id="cb8-23"><a href="#cb8-23"></a>        cpuDataPtr = (<span class="dt">float</span>*)RHILockTexture2D(</span>
+<span id="cb8-24"><a href="#cb8-24"></a>            uTex2DRes,</span>
+<span id="cb8-25"><a href="#cb8-25"></a>            <span class="dv">0</span>,</span>
+<span id="cb8-26"><a href="#cb8-26"></a>            RLM_ReadOnly,</span>
+<span id="cb8-27"><a href="#cb8-27"></a>            Lolstrid,</span>
+<span id="cb8-28"><a href="#cb8-28"></a>            <span class="kw">true</span>);</span>
+<span id="cb8-29"><a href="#cb8-29"></a>        <span class="co">// buff大小</span></span>
+<span id="cb8-30"><a href="#cb8-30"></a>        uint32 sx = buffsize.X;</span>
+<span id="cb8-31"><a href="#cb8-31"></a>        uint32 sy = buffsize.Y;</span>
+<span id="cb8-32"><a href="#cb8-32"></a>        mydata.AddUninitialized(sx * sy);</span>
+<span id="cb8-33"><a href="#cb8-33"></a>        memcpy(mydata.GetData(), cpuDataPtr, sx * sy * <span class="kw">sizeof</span>(DepthPixel));</span>
+<span id="cb8-34"><a href="#cb8-34"></a>        RHIUnlockTexture2D(uTex2DRes, <span class="dv">0</span>, <span class="kw">true</span>);</span>
+<span id="cb8-35"><a href="#cb8-35"></a>        FSceneRenderTargets::Get(RHICmdList).AdjustGBufferRefCount(RHICmdList, -<span class="dv">1</span>);</span>
+<span id="cb8-36"><a href="#cb8-36"></a></span>
+<span id="cb8-37"><a href="#cb8-37"></a>    });</span>
+<span id="cb8-38"><a href="#cb8-38"></a>    FlushRenderingCommands();</span>
+<span id="cb8-39"><a href="#cb8-39"></a>    TArray&lt;FColor&gt; RawPixels;</span>
+<span id="cb8-40"><a href="#cb8-40"></a>    RawPixels.AddUninitialized(buffsize.X * buffsize.Y);</span>
+<span id="cb8-41"><a href="#cb8-41"></a>    <span class="cf">for</span> (uint64 i = <span class="dv">0</span>; i &lt; buffsize.X * buffsize.Y; ++i)</span>
+<span id="cb8-42"><a href="#cb8-42"></a>    {</span>
+<span id="cb8-43"><a href="#cb8-43"></a>        <span class="co">// Switch Blue changes.</span></span>
+<span id="cb8-44"><a href="#cb8-44"></a>        uint8 v = mydata[i].depth * <span class="dv">10000000</span>;</span>
+<span id="cb8-45"><a href="#cb8-45"></a>        <span class="at">const</span> uint8 PR = v &gt; <span class="dv">255</span> ? <span class="dv">255</span> : v;</span>
+<span id="cb8-46"><a href="#cb8-46"></a>        RawPixels[i].B = PR;</span>
+<span id="cb8-47"><a href="#cb8-47"></a>    }</span>
+<span id="cb8-48"><a href="#cb8-48"></a>    FString finfo = <span class="st">&quot;D:</span><span class="sc">\\</span><span class="st">aDepth.bmp&quot;</span>;   <span class="co">// 输出图片路径</span></span>
+<span id="cb8-49"><a href="#cb8-49"></a>    <span class="dt">bool</span> imageSavedOk = FFileHelper::CreateBitmap(*finfo, buffsize.X, buffsize.Y, RawPixels.GetData()); <span class="co">// 输出灰度图</span></span>
+<span id="cb8-50"><a href="#cb8-50"></a>    <span class="cf">if</span> (imageSavedOk)</span>
+<span id="cb8-51"><a href="#cb8-51"></a>        GEngine-&gt;AddOnScreenDebugMessage(-<span class="dv">1</span>, <span class="dv">4</span>, FColor::Red, FString::Printf(TEXT(<span class="st">&quot;Depth Image capture Ok!&quot;</span>)));</span>
+<span id="cb8-52"><a href="#cb8-52"></a>}</span></code></pre></div>
+<p>输出图片验证：</p>
+<figure>
+<img src="https://i.loli.net/2020/06/28/4XWV7ecZMtGLlPN.png" alt="" /><figcaption>Depth</figcaption>
+</figure>
